@@ -8,7 +8,7 @@ from typing import Literal, TypeAlias
 
 import numpy as np
 
-from src.typed_numpy.ndarray import TypedNDArray
+from .ndarray import TypedNDArray
 
 ## Helpers
 
