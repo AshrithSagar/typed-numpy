@@ -1,8 +1,8 @@
 """
-Typed numpy NDArray's
+Typed NumPy NDArray
 =======
-src/typed_numpy/ndarray.py
 """
+# src/typed_numpy/ndarray.py
 
 from types import GenericAlias
 from typing import Any, Literal, TypeAlias, TypeVar, get_args, get_origin
