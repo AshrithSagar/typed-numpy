@@ -12,7 +12,7 @@ import numpy.typing as npt
 
 ## Typed NDArray
 
-_AcceptedDim: TypeAlias = int | TypeVar | None
+_AcceptedDim: TypeAlias = int | None
 _RuntimeDim: TypeAlias = int | None
 _RuntimeShape: TypeAlias = tuple[_RuntimeDim, ...]
 
@@ -38,8 +38,6 @@ def _normalise_dim(dim: _AcceptedDim) -> _RuntimeDim:
         return None
     if isinstance(dim, int):
         return dim
-    if isinstance(dim, TypeVar):
-        return None
 
     origin = get_origin(dim)
     if origin is Literal:

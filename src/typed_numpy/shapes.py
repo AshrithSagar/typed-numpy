@@ -4,7 +4,38 @@ Shapes
 """
 # src/typed_numpy/shapes.py
 
-from typing import Literal, TypeAlias
+from typing import Callable, Generic, Literal, TypeAlias, cast
+
+import numpy.typing as npt
+
+from typed_numpy.ndarray import TypedNDArray, _ShapeT_co
+
+
+class Shape(Generic[_ShapeT_co]):
+    """
+    Descriptor that produces a constructor:
+        (ArrayLike) -> TypedNDArray[_ShapeT_co]
+    """
+
+    def __init__(self, *dims: object) -> None:
+        # dims are symbolic: "D", int, None, etc.
+        self.dims = dims
+
+    def __get__(
+        self, obj, owner
+    ) -> Callable[[npt.ArrayLike], TypedNDArray[_ShapeT_co]]:
+        if obj is None:
+            return self  # type: ignore[return-value]
+
+        dim = getattr(obj, "__dim__", None)
+
+        def constructor(arr: npt.ArrayLike) -> TypedNDArray[_ShapeT_co]:
+            runtime_shape = tuple(dim if d == "D" else d for d in self.dims)
+            runtime_shape = cast(_ShapeT_co, runtime_shape)
+            return TypedNDArray(arr, shape=runtime_shape)
+
+        return constructor
+
 
 # Literal type aliases for small integers
 TWO: TypeAlias = Literal[2]
