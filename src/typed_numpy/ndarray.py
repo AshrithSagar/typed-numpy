@@ -5,7 +5,7 @@ Typed NumPy NDArray
 # src/typed_numpy/ndarray.py
 
 from types import GenericAlias
-from typing import Any, Literal, TypeAlias, TypeVar, get_args, get_origin
+from typing import Any, Literal, TypeAlias, TypeVar, cast, get_args, get_origin
 
 import numpy as np
 import numpy.typing as npt
@@ -51,6 +51,7 @@ def _normalise_dim(dim: _AcceptedDim) -> _RuntimeDim:
 
 
 def _normalise_shape(shape: _Shape) -> _RuntimeShape:
+    """Normalise each dimension in a shape specifier."""
     return tuple(_normalise_dim(dim) for dim in shape)
 
 
@@ -60,7 +61,7 @@ class TypedNDArray(np.ndarray[_ShapeT_co, _DTypeT_co]):
     __shape__: _RuntimeShape | None = None
     """Runtime shape metadata."""
 
-    __static_params__: tuple | None = None
+    __static_params__: tuple[Any, Any] | None = None
     """Static parameters: (shape, dtype)."""
 
     @classmethod
@@ -128,7 +129,8 @@ class TypedNDArray(np.ndarray[_ShapeT_co, _DTypeT_co]):
                         f"Shape mismatch: expected {expected}, got {actual}"
                     )
 
-        return obj
+        # numpy.ndarray.view should suffice, but we cast explicitly for strict type checkers
+        return cast(TypedNDArray[_ShapeT_co, _DTypeT_co], obj)
 
     def __array_finalize__(self, obj: npt.NDArray[Any] | None, /) -> None:
         if obj is None:
