@@ -5,7 +5,17 @@ Typed NumPy NDArray
 # src/typed_numpy/ndarray.py
 
 from types import GenericAlias
-from typing import Any, Literal, TypeAlias, TypeVar, cast, get_args, get_origin
+from typing import (
+    Any,
+    Callable,
+    Generic,
+    Literal,
+    TypeAlias,
+    TypeVar,
+    cast,
+    get_args,
+    get_origin,
+)
 
 import numpy as np
 import numpy.typing as npt
@@ -140,3 +150,29 @@ class TypedNDArray(np.ndarray[_ShapeT_co, _DTypeT_co]):
 
     def __repr__(self) -> str:
         return str(np.asarray(self).__repr__())
+
+
+class ShapedNDArray(Generic[_ShapeT_co]):
+    """
+    Descriptor that produces a constructor:
+        (ArrayLike) -> TypedNDArray[_ShapeT_co]
+    """
+
+    def __init__(self, *dims: _AcceptedDim | str) -> None:
+        # dims are symbolic: "D", int, None, etc.
+        self.dims = dims
+
+    def __get__(
+        self, obj: object | None, owner: Any
+    ) -> Callable[[npt.ArrayLike], TypedNDArray[_ShapeT_co]]:
+        if obj is None:
+            return self  # type: ignore[return-value]
+
+        dim: _RuntimeDim = getattr(obj, "__dim__", None)
+
+        def constructor(arr: npt.ArrayLike) -> TypedNDArray[_ShapeT_co]:
+            runtime_shape = tuple(dim if d == "D" else d for d in self.dims)
+            runtime_shape = cast(_ShapeT_co, runtime_shape)
+            return TypedNDArray(arr, shape=runtime_shape)
+
+        return constructor
