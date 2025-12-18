@@ -6,10 +6,9 @@ Typed NumPy
 
 import numpy
 
-from .ndarray import ShapedNDArray, TypedNDArray
+import typed_numpy._typed as typed
 
 __all__ = [
     "numpy",
-    "TypedNDArray",
-    "ShapedNDArray",
+    "typed",
 ]

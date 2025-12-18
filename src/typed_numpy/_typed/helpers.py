@@ -2,14 +2,23 @@
 Helpers for TypedNDArray
 =======
 """
-# src/typed_numpy/helpers.py
+# src/typed_numpy/_typed/helpers.py
 
 from typing import TypeAlias
 
 import numpy as np
 
-from .ndarray import TypedNDArray
-from .shapes import FOUR, THREE, TWO, Shape1D, Shape2D, Shape3D, Shape4D, ShapeND
+from typed_numpy._typed.ndarray import TypedNDArray
+from typed_numpy._typed.shapes import (
+    FOUR,
+    THREE,
+    TWO,
+    Shape1D,
+    Shape2D,
+    Shape3D,
+    Shape4D,
+    ShapeND,
+)
 
 ## Helpers
 

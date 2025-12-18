@@ -2,7 +2,7 @@
 Dimensions
 =======
 """
-# src/typed_numpy/dimensions.py
+# src/typed_numpy/_typed/dimensions.py
 
 from typing import Any, Generic, Literal, TypeVar, cast, get_args, get_origin
 

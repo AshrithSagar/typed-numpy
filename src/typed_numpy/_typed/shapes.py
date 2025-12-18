@@ -2,11 +2,15 @@
 Shapes
 =======
 """
-# src/typed_numpy/shapes.py
+# src/typed_numpy/_typed/shapes.py
 
 from typing import Literal, TypeAlias
 
 # Literal type aliases for small integers
+ZERO: TypeAlias = Literal[0]
+"""Literal type for the integer `0`."""
+ONE: TypeAlias = Literal[1]
+"""Literal type for the integer `1`."""
 TWO: TypeAlias = Literal[2]
 """Literal type for the integer `2`."""
 THREE: TypeAlias = Literal[3]
