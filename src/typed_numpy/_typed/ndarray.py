@@ -5,24 +5,14 @@ NDArray
 # src/typed_numpy/_typed/ndarray.py
 
 from types import GenericAlias
-from typing import (
-    Any,
-    Callable,
-    Generic,
-    Literal,
-    TypeAlias,
-    TypeVar,
-    cast,
-    get_args,
-    get_origin,
-)
+from typing import Any, Literal, TypeAlias, TypeVar, get_args, get_origin
 
 import numpy as np
 import numpy.typing as npt
 
 ## Typed NDArray
 
-_AcceptedDim: TypeAlias = int | None
+_AcceptedDim: TypeAlias = int | TypeVar | None
 _RuntimeDim: TypeAlias = int | None
 _RuntimeShape: TypeAlias = tuple[_RuntimeDim, ...]
 
@@ -46,14 +36,38 @@ def _normalise_dim(dim: _AcceptedDim) -> _RuntimeDim:
 
     if dim is None:
         return None
+    if dim is int:  # [FIXME] mypy --strict complains [comparison-overlap]
+        return None
     if isinstance(dim, int):
+        # Misuse, Prefer using Literal int
         return dim
 
     origin = get_origin(dim)
     if origin is Literal:
-        lit = get_args(dim)
-        if len(lit) == 1 and isinstance(lit[0], int):
-            return lit[0]
+        lits = get_args(dim)
+        if not len(lits) == 1:
+            # [TODO] Should Literal[2, 3] style be allowed?
+            raise DimensionError(f"Unsupported dimension {dim}")
+        (lit,) = lits
+        if isinstance(lit, int):
+            return lit
+        else:
+            if isinstance(lit, float):
+                raise DimensionError(f"Invalid dimension type {type(dim)}")
+            elif isinstance(lit, str):
+                try:
+                    _int = int(lit)
+                    # Misuse, Prefer Literal int over Literal str
+                    return _int
+                except Exception:
+                    raise DimensionError(f"Invalid dimension {dim}")
+            raise DimensionError
+
+    if type(dim) is TypeVar:
+        # Prefer TypeAlias when using Generics, prolly
+        _bound = getattr(dim, "__bound__", None)
+        _default = getattr(dim, "__default__", None)
+        return None
 
     return None  # Fallback
 
@@ -73,16 +87,23 @@ class TypedNDArray(np.ndarray[_ShapeT_co, _DTypeT_co]):
     """Static parameters: (shape, dtype)."""
 
     @classmethod
-    def __class_getitem__(cls, item: Any, /) -> Any:  # Overrides base
-        if isinstance(item, tuple):
-            _shape, _dtype = item
-        elif isinstance(item, GenericAlias):
-            _shape, _dtype = item, Any
+    def __class_getitem__(
+        cls,
+        item:
+        # Stronger type promotion
+        GenericAlias | tuple[GenericAlias, GenericAlias],
+        /,
+    ) -> GenericAlias:
+        _item: tuple[GenericAlias, GenericAlias | Any]
+        if not isinstance(item, tuple):
+            _item = (item, Any)
         else:
-            _shape, _dtype = Any, Any
-        return type(
-            f"{cls.__name__}[{item}]", (cls,), {"__static_params__": (_shape, _dtype)}
-        )
+            _item = item
+        if len(_item) != 2:
+            raise TypeError(f"{cls.__name__}[...] expects (shape, dtype) or shape")
+        cls.__static_params__ = _item
+        alias = GenericAlias(cls, _item)
+        return alias
 
     def __new__(
         cls,
@@ -126,53 +147,35 @@ class TypedNDArray(np.ndarray[_ShapeT_co, _DTypeT_co]):
             expected = obj.__shape__
             actual = _arr.shape
 
+            # Rank enforcement
             if len(expected) != len(actual):
                 raise DimensionError(
                     f"Dimension mismatch: expected {len(expected)}, got {len(actual)}"
                 )
 
+            # Shape enforcement
             for exp, act in zip(expected, actual):
-                if exp is not None and exp != act:
+                if exp is None:  # No dimension check
+                    continue
+                if exp != act:
                     raise ShapeError(
                         f"Shape mismatch: expected {expected}, got {actual}"
                     )
 
-        # numpy.ndarray.view should suffice, but we cast explicitly for strict type checkers
-        return cast(TypedNDArray[_ShapeT_co, _DTypeT_co], obj)
+        # numpy.ndarray.view should suffice for the return type;
+        # Explicit casting would prolly have a redunant call to TypedNDArray.__class_getitem__;
+        # So we just use a type: ignore comment, for strict type checkers [mypy --strict];
+        return obj  # type: ignore
+        # return cast(TypedNDArray[_ShapeT_co, _DTypeT_co], obj)
 
     def __array_finalize__(self, obj: npt.NDArray[Any] | None, /) -> None:
         if obj is None:
             return
 
         # Propagate metadata
+        # [FIXME] May have downstream side effects
         self.__shape__ = getattr(obj, "__shape__", None)
         self.__static_params__ = getattr(obj, "__static_params__", None)
 
     def __repr__(self) -> str:
         return str(np.asarray(self).__repr__())
-
-
-class ShapedNDArray(Generic[_ShapeT_co]):
-    """
-    Descriptor that produces a constructor:
-        (ArrayLike) -> TypedNDArray[_ShapeT_co]
-    """
-
-    def __init__(self, *dims: _AcceptedDim | str) -> None:
-        # dims are symbolic: "D", int, None, etc.
-        self.dims = dims
-
-    def __get__(
-        self, obj: object | None, owner: Any
-    ) -> Callable[[npt.ArrayLike], TypedNDArray[_ShapeT_co]]:
-        if obj is None:
-            return self  # type: ignore[return-value]
-
-        dim: _RuntimeDim = getattr(obj, "__dim__", None)
-
-        def constructor(arr: npt.ArrayLike) -> TypedNDArray[_ShapeT_co]:
-            runtime_shape = tuple(dim if d == "D" else d for d in self.dims)
-            runtime_shape = cast(_ShapeT_co, runtime_shape)
-            return TypedNDArray(arr, shape=runtime_shape)
-
-        return constructor
