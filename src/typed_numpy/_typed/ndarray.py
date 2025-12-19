@@ -65,8 +65,6 @@ def _normalise_dim(dim: _AcceptedDim) -> _RuntimeDim:
 
     if type(dim) is TypeVar:
         # Prefer TypeAlias when using Generics, prolly
-        _bound = getattr(dim, "__bound__", None)
-        _default = getattr(dim, "__default__", None)
         return None
 
     return None  # Fallback
@@ -80,7 +78,7 @@ def _normalise_shape(shape: _Shape) -> _RuntimeShape:
 class TypedNDArray(np.ndarray[_ShapeT_co, _DTypeT_co]):
     """Generic `numpy.ndarray` subclass with static shape typing and runtime shape validation."""
 
-    __shape__: _RuntimeShape | None = None
+    __bound_shape__: _RuntimeShape | None = None
     """Runtime shape metadata."""
 
     __static_params__: tuple[Any, Any] | None = None
@@ -93,17 +91,21 @@ class TypedNDArray(np.ndarray[_ShapeT_co, _DTypeT_co]):
         # Stronger type promotion
         GenericAlias | tuple[GenericAlias, GenericAlias],
         /,
-    ) -> GenericAlias:
-        _item: tuple[GenericAlias, GenericAlias | Any]
-        if not isinstance(item, tuple):
-            _item = (item, Any)
+    ) -> Any:  # Overrides base
+        # [HACK] Misuses __class_getitem__
+        # See https://docs.python.org/3/reference/datamodel.html#the-purpose-of-class-getitem
+        _dtype: Any
+        if isinstance(item, tuple):
+            if len(item) != 2:
+                raise TypeError(f"{cls.__name__}[...] expects (shape, dtype) or shape")
+            _shape, _dtype = item
+        elif isinstance(item, GenericAlias):
+            _shape, _dtype = item, Any
         else:
-            _item = item
-        if len(_item) != 2:
-            raise TypeError(f"{cls.__name__}[...] expects (shape, dtype) or shape")
-        cls.__static_params__ = _item
-        alias = GenericAlias(cls, _item)
-        return alias
+            _shape, _dtype = Any, Any
+        return type(
+            f"{cls.__name__}[{item}]", (cls,), {"__static_params__": (_shape, _dtype)}
+        )
 
     def __new__(
         cls,
@@ -136,15 +138,15 @@ class TypedNDArray(np.ndarray[_ShapeT_co, _DTypeT_co]):
 
         # Set metadata
         if shape is not None:
-            obj.__shape__ = _normalise_shape(shape)
+            obj.__bound_shape__ = _normalise_shape(shape)
         elif _shape_static is not None:
-            obj.__shape__ = _normalise_shape(_shape_static)
+            obj.__bound_shape__ = _normalise_shape(_shape_static)
         else:
-            obj.__shape__ = None
+            obj.__bound_shape__ = None
 
         # Runtime validation
-        if obj.__shape__ is not None:
-            expected = obj.__shape__
+        if obj.__bound_shape__ is not None:
+            expected = obj.__bound_shape__
             actual = _arr.shape
 
             # Rank enforcement
@@ -162,7 +164,7 @@ class TypedNDArray(np.ndarray[_ShapeT_co, _DTypeT_co]):
                         f"Shape mismatch: expected {expected}, got {actual}"
                     )
 
-        # numpy.ndarray.view should suffice for the return type;
+        # [NOTE] numpy.ndarray.view should suffice for the return type;
         # Explicit casting would prolly have a redunant call to TypedNDArray.__class_getitem__;
         # So we just use a type: ignore comment, for strict type checkers [mypy --strict];
         return obj  # type: ignore
@@ -174,7 +176,7 @@ class TypedNDArray(np.ndarray[_ShapeT_co, _DTypeT_co]):
 
         # Propagate metadata
         # [FIXME] May have downstream side effects
-        self.__shape__ = getattr(obj, "__shape__", None)
+        self.__bound_shape__ = getattr(obj, "__bound_shape__", None)
         self.__static_params__ = getattr(obj, "__static_params__", None)
 
     def __repr__(self) -> str:
