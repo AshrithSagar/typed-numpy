@@ -17,41 +17,43 @@ from typed_numpy._typed.ndarray import (
 
 ## Dimension Generics
 
-DimT = TypeVar("DimT", bound=int, default=int)
 
+class DimVar:
+    def __init__(self) -> None:
+        self._name: str | None = None
 
-class GenericDim(Generic[DimT]):
-    """Base class that binds Literal dimensions at class creation."""
-
-    __dim__: DimT | None = None
-
-    def __init_subclass__(cls, **kwargs: Any) -> None:
-        super().__init_subclass__(**kwargs)
-
-        for base in getattr(cls, "__orig_bases__", ()):
-            origin = get_origin(base)
-            args = get_args(base)
-
-            if origin is GenericDim and args:
-                (arg,) = args
-            elif origin and issubclass(origin, GenericDim) and args:
-                (arg,) = args
-            else:
-                continue
-
-            if get_origin(arg) is Literal:
-                (value,) = get_args(arg)
-                value = cast(DimT, value)
-                cls.__dim__ = value
-                return
-
-
-class DimVar(Generic[DimT]):
-    def __set_name__(self, owner: GenericDim, name: str) -> None:
+    def __set_name__(self, owner: object, name: str) -> None:
         self._name = name
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self._name})"
+
+
+class DimVarBinder:
+    """Base class that binds Literal dimensions at class creation."""
+
+    __dim_bindings__: dict[DimVar, int]
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        cls.__dim_bindings__ = {}
+
+        dimvars: list[DimVar] = []
+        for base in cls.__mro__:
+            for v in base.__dict__.values():
+                if isinstance(v, DimVar):
+                    dimvars.append(v)
+
+        for base in getattr(cls, "__orig_bases__", ()):
+            origin = get_origin(base)
+            args = get_args(base)
+            if not origin or not issubclass(origin, DimVarBinder) or not args:
+                continue
+
+            for dimvar, arg in zip(dimvars, args):
+                if get_origin(arg) is Literal:
+                    (value,) = get_args(arg)
+                    cls.__dim_bindings__[dimvar] = value
 
 
 class ShapedNDArray(Generic[_ShapeT_co]):
@@ -71,11 +73,11 @@ class ShapedNDArray(Generic[_ShapeT_co]):
         if obj is None:
             return self  # type: ignore[return-value]
 
-        _dim: _RuntimeDim | None = getattr(obj, "__dim__", None)
+        bindings = getattr(type(obj), "__dim_bindings__", {})
 
         def resolve_dim(dim: _AcceptedDim | DimVar) -> _RuntimeDim:
             if isinstance(dim, DimVar):
-                return _dim
+                return bindings.get(dim, None)
             elif isinstance(dim, TypeVar):
                 # Prefer DimVar for runtime-validation
                 return None
