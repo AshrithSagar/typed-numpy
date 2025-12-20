@@ -5,11 +5,11 @@ description = "Typed NumPy with static shape typing and runtime shape validation
 readme = "README.md"
 authors = [{ name = "Ashrith Sagar", email = "ashrith9sagar@gmail.com" }]
 requires-python = ">=3.11"
-dependencies = ["numpy>=2.3.5"]
+dependencies = ["numpy>=2.4.0"]
 
 [build-system]
-requires = ["uv_build>=0.9.17,<0.10.0"]
+requires = ["uv_build>=0.9.18,<0.10.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
-dev = ["mypy>=1.19.1", "ruff>=0.14.9"]
+dev = ["mypy>=1.19.1", "ruff>=0.14.10"]
