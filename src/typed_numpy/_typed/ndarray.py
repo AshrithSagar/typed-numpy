@@ -5,14 +5,27 @@ NDArray
 # src/typed_numpy/_typed/ndarray.py
 
 from types import GenericAlias
-from typing import Any, Literal, TypeAlias, TypeVar, get_args, get_origin
+from typing import (
+    Any,
+    Generic,
+    Literal,
+    TypeAlias,
+    TypeVar,
+    TypeVarTuple,
+    Unpack,
+    get_args,
+    get_origin,
+)
 
 import numpy as np
 import numpy.typing as npt
 
 ## Typed NDArray
 
+Ts = TypeVarTuple("Ts")
+
 _AcceptedDim: TypeAlias = int | TypeVar | None
+_AcceptedShape: TypeAlias = tuple[_AcceptedDim, ...]
 _RuntimeDim: TypeAlias = int | None
 _RuntimeShape: TypeAlias = tuple[_RuntimeDim, ...]
 
@@ -181,3 +194,47 @@ class TypedNDArray(np.ndarray[_ShapeT_co, _DTypeT_co]):
 
     def __repr__(self) -> str:
         return str(np.asarray(self).__repr__())
+
+
+class _NDShape(Generic[Unpack[Ts]]):
+    def __init__(self, shape: _AcceptedDim | _AcceptedShape):
+        self.shape = self._normalise_shape(shape)
+
+    def _normalise_shape(self, item: _AcceptedDim | _AcceptedShape) -> _AcceptedShape:
+        if not isinstance(item, tuple):
+            _item = tuple((item,))
+        else:
+            _item = item
+        return _item
+
+    def __getitem__(self, item: _AcceptedDim | _AcceptedShape):
+        _item = self._normalise_shape(item)
+        if len(_item) > len(self.shape):
+            # For a runtime error; Statically should already be caught;
+            raise DimensionError("Too many dimensions")
+        shape = _item + self.shape[len(_item) :]
+        # [NOTE] Limitation: Binding order is from right to left
+        return _NDShape(shape=shape)
+
+    def __call__(
+        self,
+        arr: npt.ArrayLike,
+        *,
+        dtype: npt.DTypeLike | None = None,
+        shape: _ShapeT_co | None = None,
+    ):
+        # [NOTE] Should mimick TypedNDArray.__new__ signature
+        # [TODO] Resolve any potential side-effects through the provided shape kwarg?
+        return TypedNDArray(arr, dtype=dtype, shape=self.shape)
+
+    def __repr__(self) -> str:
+        dims = ", ".join(str(dim) for dim in self.shape)
+        return f"ShapedNDArray[{dims}]"
+
+
+class ShapedNDArray(TypedNDArray[tuple[Unpack[Ts]]]):
+    @classmethod
+    def __class_getitem__(cls, dims: Any, /) -> Any:
+        # [HACK] Misuses __class_getitem__
+        # See https://docs.python.org/3/reference/datamodel.html#the-purpose-of-class-getitem
+        return _NDShape(shape=dims)
