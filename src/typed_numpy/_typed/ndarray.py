@@ -107,6 +107,7 @@ class TypedNDArray(np.ndarray[_ShapeT_co, _DTypeT_co]):
     ) -> Any:  # Overrides base
         # [HACK] Misuses __class_getitem__
         # See https://docs.python.org/3/reference/datamodel.html#the-purpose-of-class-getitem
+
         _dtype: Any
         if isinstance(item, tuple):
             if len(item) != 2:
@@ -116,6 +117,13 @@ class TypedNDArray(np.ndarray[_ShapeT_co, _DTypeT_co]):
             _shape, _dtype = item, Any
         else:
             _shape, _dtype = Any, Any
+
+        # Defer evaluation for generics
+        if isinstance(_shape, GenericAlias):
+            args = get_args(_shape)
+            if any(type(a) is TypeVar for a in args):
+                return _NDShape(cls, args)
+
         return type(
             f"{cls.__name__}[{item}]", (cls,), {"__static_params__": (_shape, _dtype)}
         )
@@ -197,7 +205,8 @@ class TypedNDArray(np.ndarray[_ShapeT_co, _DTypeT_co]):
 
 
 class _NDShape(Generic[Unpack[Ts]]):
-    def __init__(self, shape: _AcceptedDim | _AcceptedShape):
+    def __init__(self, cls: type[TypedNDArray], shape: _AcceptedDim | _AcceptedShape):
+        self.base = cls
         self.shape = self._normalise_shape(shape)
 
     def _normalise_shape(self, item: _AcceptedDim | _AcceptedShape) -> _AcceptedShape:
@@ -214,7 +223,7 @@ class _NDShape(Generic[Unpack[Ts]]):
             raise DimensionError("Too many dimensions")
         shape = _item + self.shape[len(_item) :]
         # [NOTE] Limitation: Binding order is from right to left
-        return _NDShape(shape=shape)
+        return _NDShape(cls=self.base, shape=shape)
 
     def __call__(
         self,
@@ -225,16 +234,8 @@ class _NDShape(Generic[Unpack[Ts]]):
     ):
         # [NOTE] Should mimick TypedNDArray.__new__ signature
         # [TODO] Resolve any potential side-effects through the provided shape kwarg?
-        return TypedNDArray(arr, dtype=dtype, shape=self.shape)
+        return self.base(arr, dtype=dtype, shape=self.shape)
 
     def __repr__(self) -> str:
         dims = ", ".join(str(dim) for dim in self.shape)
-        return f"ShapedNDArray[{dims}]"
-
-
-class ShapedNDArray(TypedNDArray[tuple[Unpack[Ts]]]):
-    @classmethod
-    def __class_getitem__(cls, dims: Any, /) -> Any:
-        # [HACK] Misuses __class_getitem__
-        # See https://docs.python.org/3/reference/datamodel.html#the-purpose-of-class-getitem
-        return _NDShape(shape=dims)
+        return f"{self.base.__name__}[{dims}]"
