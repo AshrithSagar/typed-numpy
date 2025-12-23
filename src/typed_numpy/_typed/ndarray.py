@@ -5,24 +5,13 @@ NDArray
 # src/typed_numpy/_typed/ndarray.py
 
 from types import GenericAlias
-from typing import (
-    Any,
-    Generic,
-    Literal,
-    TypeAlias,
-    TypeVar,
-    TypeVarTuple,
-    Unpack,
-    get_args,
-    get_origin,
-)
+from typing import Any, Literal, TypeAlias, TypeVar, get_args, get_origin
 
 import numpy as np
 import numpy.typing as npt
 
 ## Typed NDArray
 
-Ts = TypeVarTuple("Ts")
 
 _AcceptedDim: TypeAlias = int | TypeVar | None
 _AcceptedShape: TypeAlias = tuple[_AcceptedDim, ...]
@@ -44,40 +33,24 @@ _ShapeT_co = TypeVar("_ShapeT_co", bound=_Shape, default=_AnyShape, covariant=Tr
 _DTypeT_co = TypeVar("_DTypeT_co", bound=np.dtype, default=np.dtype, covariant=True)
 
 
-def _normalise_dim(dim: _AcceptedDim) -> _RuntimeDim:
+def _normalise_dim(dim: _AcceptedDim | type[int]) -> _RuntimeDim:
     """Normalise a dimension specifier into something that can be runtime-validated."""
 
     if dim is None:
         return None
-    if dim is int:  # [FIXME] mypy --strict complains [comparison-overlap]
+    if dim is int:
         return None
     if isinstance(dim, int):
-        # Misuse, Prefer using Literal int
         return dim
 
     origin = get_origin(dim)
     if origin is Literal:
-        lits = get_args(dim)
-        if not len(lits) == 1:
-            # [TODO] Should Literal[2, 3] style be allowed?
-            raise DimensionError(f"Unsupported dimension {dim}")
-        (lit,) = lits
-        if isinstance(lit, int):
-            return lit
-        else:
-            if isinstance(lit, float):
-                raise DimensionError(f"Invalid dimension type {type(dim)}")
-            elif isinstance(lit, str):
-                try:
-                    _int = int(lit)
-                    # Misuse, Prefer Literal int over Literal str
-                    return _int
-                except Exception:
-                    raise DimensionError(f"Invalid dimension {dim}")
-            raise DimensionError
+        lit = get_args(dim)
+        if len(lit) == 1 and isinstance(lit[0], int):
+            return lit[0]
 
     if type(dim) is TypeVar:
-        # Prefer TypeAlias when using Generics, prolly
+        # Prefer TypeAlias when using Generics
         return None
 
     return None  # Fallback
@@ -204,7 +177,12 @@ class TypedNDArray(np.ndarray[_ShapeT_co, _DTypeT_co]):
         return str(np.asarray(self).__repr__())
 
 
-class _NDShape(Generic[Unpack[Ts]]):
+class _NDShape:
+    """
+    Deferred TypedNDArray constructor with partially-bound shape.
+    Behaves like a type-level curry.
+    """
+
     def __init__(self, cls: type[TypedNDArray], shape: _AcceptedDim | _AcceptedShape):
         self.base = cls
         self.shape = self._normalise_shape(shape)
@@ -216,7 +194,7 @@ class _NDShape(Generic[Unpack[Ts]]):
             _item = item
         return _item
 
-    def __getitem__(self, item: _AcceptedDim | _AcceptedShape):
+    def __getitem__(self, item: _AcceptedDim | _AcceptedShape) -> "_NDShape":
         _item = self._normalise_shape(item)
         if len(_item) > len(self.shape):
             # For a runtime error; Statically should already be caught;
@@ -231,7 +209,7 @@ class _NDShape(Generic[Unpack[Ts]]):
         *,
         dtype: npt.DTypeLike | None = None,
         shape: _ShapeT_co | None = None,
-    ):
+    ) -> TypedNDArray[_AnyShape, np.dtype[Any]]:
         # [NOTE] Should mimick TypedNDArray.__new__ signature
         # [TODO] Resolve any potential side-effects through the provided shape kwarg?
         return self.base(arr, dtype=dtype, shape=self.shape)
