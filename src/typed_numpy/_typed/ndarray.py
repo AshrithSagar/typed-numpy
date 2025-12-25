@@ -33,8 +33,8 @@ _ShapeT_co = TypeVar("_ShapeT_co", bound=_Shape, default=_AnyShape, covariant=Tr
 _DTypeT_co = TypeVar("_DTypeT_co", bound=np.dtype, default=np.dtype, covariant=True)
 
 
-def _normalise_dim(dim: _AcceptedDim | type[int]) -> _RuntimeDim:
-    """Normalise a dimension specifier into something that can be runtime-validated."""
+def _resolve_dim(dim: _AcceptedDim | type[int]) -> _RuntimeDim:
+    """Resolve a dimension specifier into something that can be runtime-validated."""
 
     if dim is None:
         return None
@@ -56,9 +56,13 @@ def _normalise_dim(dim: _AcceptedDim | type[int]) -> _RuntimeDim:
     return None  # Fallback
 
 
-def _normalise_shape(shape: _Shape) -> _RuntimeShape:
-    """Normalise each dimension in a shape specifier."""
-    return tuple(_normalise_dim(dim) for dim in shape)
+def _resolve_shape(shape: _Shape) -> _RuntimeShape:
+    """Resolve each dimension in a shape specifier."""
+    return tuple(_resolve_dim(dim) for dim in shape)
+
+
+def _normalise_shape(item: _AcceptedDim | _AcceptedShape) -> _AcceptedShape:
+    return item if isinstance(item, tuple) else (item,)
 
 
 class TypedNDArray(np.ndarray[_ShapeT_co, _DTypeT_co]):
@@ -132,9 +136,9 @@ class TypedNDArray(np.ndarray[_ShapeT_co, _DTypeT_co]):
 
         # Set metadata
         if shape is not None:
-            obj.__bound_shape__ = _normalise_shape(shape)
+            obj.__bound_shape__ = _resolve_shape(shape)
         elif _shape_static is not None:
-            obj.__bound_shape__ = _normalise_shape(_shape_static)
+            obj.__bound_shape__ = _resolve_shape(_shape_static)
         else:
             obj.__bound_shape__ = None
 
@@ -185,25 +189,18 @@ class _NDShape:
 
     def __init__(self, cls: type[TypedNDArray], shape: _AcceptedDim | _AcceptedShape):
         self.base = cls
-        self.shape = self._normalise_shape(shape)
-
-    def _normalise_shape(self, item: _AcceptedDim | _AcceptedShape) -> _AcceptedShape:
-        if not isinstance(item, tuple):
-            _item = tuple((item,))
-        else:
-            _item = item
-        return _item
+        self.shape = _normalise_shape(shape)
 
     def __getitem__(self, item: _AcceptedDim | _AcceptedShape) -> "_NDShape":
-        """Bind dimensions to the leftmost unbound TypeVars."""
-        _item = self._normalise_shape(item)
+        """Bind dimensions to unbound TypeVars by position."""
+        _item = _normalise_shape(item)
         unbound = [i for i, dim in enumerate(self.shape) if isinstance(dim, TypeVar)]
         if len(_item) > len(unbound):
             # For a runtime error; Statically should already be caught;
             raise DimensionError("Too many dimensions")
 
         shape = list(self.shape)
-        for pos, dim in zip(unbound, _item):
+        for pos, dim in zip(unbound[: len(_item)], _item):
             shape[pos] = dim
         return _NDShape(cls=self.base, shape=tuple(shape))
 
