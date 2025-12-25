@@ -35,24 +35,13 @@ _DTypeT_co = TypeVar("_DTypeT_co", bound=np.dtype, default=np.dtype, covariant=T
 
 def _resolve_dim(dim: _AcceptedDim | type[int]) -> _RuntimeDim:
     """Resolve a dimension specifier into something that can be runtime-validated."""
-
-    if dim is None:
+    if dim is None or dim is int or type(dim) is TypeVar:
         return None
-    if dim is int:
-        return None
-    if isinstance(dim, int):
+    elif isinstance(dim, int):
         return dim
-
-    origin = get_origin(dim)
-    if origin is Literal:
-        lit = get_args(dim)
-        if len(lit) == 1 and isinstance(lit[0], int):
+    elif get_origin(dim) is Literal:
+        if (lit := get_args(dim)) and len(lit) == 1 and isinstance(lit[0], int):
             return lit[0]
-
-    if type(dim) is TypeVar:
-        # Prefer TypeAlias when using Generics
-        return None
-
     return None  # Fallback
 
 
@@ -62,7 +51,22 @@ def _resolve_shape(shape: _Shape) -> _RuntimeShape:
 
 
 def _normalise_shape(item: _AcceptedDim | _AcceptedShape) -> _AcceptedShape:
+    """Ensure shape is a tuple."""
     return item if isinstance(item, tuple) else (item,)
+
+
+def _validate_shape(expected: _RuntimeShape, actual: tuple[int, ...]) -> None:
+    """Validate shapes at runtime."""
+    # Rank enforcement
+    if len(expected) != len(actual):
+        raise DimensionError(
+            f"Dimension mismatch: expected {len(expected)}, got {len(actual)}"
+        )
+
+    # Shape enforcement
+    for exp, act in zip(expected, actual):
+        if exp is not None and exp != act:
+            raise ShapeError(f"Shape mismatch: expected {expected}, got {actual}")
 
 
 class TypedNDArray(np.ndarray[_ShapeT_co, _DTypeT_co]):
@@ -144,23 +148,7 @@ class TypedNDArray(np.ndarray[_ShapeT_co, _DTypeT_co]):
 
         # Runtime validation
         if obj.__bound_shape__ is not None:
-            expected = obj.__bound_shape__
-            actual = _arr.shape
-
-            # Rank enforcement
-            if len(expected) != len(actual):
-                raise DimensionError(
-                    f"Dimension mismatch: expected {len(expected)}, got {len(actual)}"
-                )
-
-            # Shape enforcement
-            for exp, act in zip(expected, actual):
-                if exp is None:  # No dimension check
-                    continue
-                if exp != act:
-                    raise ShapeError(
-                        f"Shape mismatch: expected {expected}, got {actual}"
-                    )
+            _validate_shape(expected=obj.__bound_shape__, actual=_arr.shape)
 
         # [NOTE] numpy.ndarray.view should suffice for the return type;
         # Explicit casting would prolly have a redunant call to TypedNDArray.__class_getitem__;
@@ -186,6 +174,8 @@ class _NDShape:
     Deferred TypedNDArray constructor with partially-bound shape.
     Behaves like a type-level curry.
     """
+
+    __slots__ = ("base", "shape")
 
     def __init__(self, cls: type[TypedNDArray], shape: _AcceptedDim | _AcceptedShape):
         self.base = cls
