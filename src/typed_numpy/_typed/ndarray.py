@@ -61,46 +61,6 @@ def _normalise_shape(shape: _Shape) -> _RuntimeShape:
     return tuple(_normalise_dim(dim) for dim in shape)
 
 
-def _resolve_type_params(cls: type, root: type) -> tuple[Any, ...] | None:
-    """Recursively resolve a class's type parameters back to the root class."""
-
-    if cls is root:
-        return None
-    orig_bases = getattr(cls, "__orig_bases__", ())
-    for base in orig_bases:
-        origin = get_origin(base)
-        if origin is None:
-            continue
-        try:
-            if not issubclass(origin, root):
-                continue
-        except TypeError:
-            continue
-
-        args = get_args(base)
-        if origin is root:
-            return args
-
-        intermediate_resolution = _resolve_type_params(origin, root)
-        if intermediate_resolution is None:
-            continue
-
-        intermediate_params = getattr(origin, "__parameters__", ())
-        substitution = {}
-        for param, arg in zip(intermediate_params, args):
-            substitution[param] = arg
-
-        final_resolution = []
-        for item in intermediate_resolution:
-            if isinstance(item, TypeVar) and item in substitution:
-                final_resolution.append(substitution[item])
-            else:
-                final_resolution.append(item)
-        return tuple(final_resolution)
-
-    return None
-
-
 class TypedNDArray(np.ndarray[_ShapeT_co, _DTypeT_co]):
     """Generic `numpy.ndarray` subclass with static shape typing and runtime shape validation."""
 
@@ -151,16 +111,9 @@ class TypedNDArray(np.ndarray[_ShapeT_co, _DTypeT_co]):
         _arr: np.ndarray[tuple[int, ...]]
         _arr = np.asarray(arr, dtype=dtype)
 
-        _params: tuple[Any, Any] | None = None
-        resolved_params = _resolve_type_params(cls, TypedNDArray)
-        if resolved_params is not None:
-            _params = resolved_params
-        elif cls.__static_params__ is not None:
-            _params = cls.__static_params__
-
         _shape_static: _Shape | None = None
-        if _params is not None:
-            _shape, _dtype = _params
+        if cls.__static_params__ is not None:
+            _shape, _dtype = cls.__static_params__
 
             # Infer dtype
             if _dtype is not Any:
@@ -243,28 +196,14 @@ class _NDShape:
 
     def __getitem__(self, item: _AcceptedDim | _AcceptedShape) -> "_NDShape":
         """Bind dimensions to the leftmost unbound TypeVars."""
-        _shape: _AcceptedShape
-        resolved = _resolve_type_params(self.base, TypedNDArray)
-        if resolved is not None:
-            resolved_shape_spec = resolved[0]  # Shape part
-            if isinstance(resolved_shape_spec, GenericAlias):
-                _shape = get_args(resolved_shape_spec)
-            elif isinstance(resolved_shape_spec, tuple):
-                _shape = resolved_shape_spec
-            else:
-                _shape = self.shape
-        else:
-            _shape = self.shape
-
         _item = self._normalise_shape(item)
-        unbound = [i for i, dim in enumerate(_shape) if isinstance(dim, TypeVar)]
+        unbound = [i for i, dim in enumerate(self.shape) if isinstance(dim, TypeVar)]
         if len(_item) > len(unbound):
             # For a runtime error; Statically should already be caught;
             raise DimensionError("Too many dimensions")
 
-        shape = list(_shape)
-        for i, dim in enumerate(_item):
-            pos = unbound[i]
+        shape = list(self.shape)
+        for pos, dim in zip(unbound, _item):
             shape[pos] = dim
         return _NDShape(cls=self.base, shape=tuple(shape))
 
