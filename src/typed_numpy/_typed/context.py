@@ -1,6 +1,7 @@
 """
 Context binding
 =======
+Manages TypeVar binding contexts for shape validation.
 """
 # src/typed_numpy/_typed/context.py
 
@@ -9,9 +10,8 @@ from contextvars import ContextVar
 from functools import wraps
 from typing import Any, TypeVar, get_args, get_origin, get_type_hints
 
-from typed_numpy._typed.ndarray import ShapeError, _NDShape
+from typed_numpy._typed.ndarray import DimensionError, _NDShape
 
-# Separate contexts for class-level vs method-level TypeVars
 _class_typevar_context = ContextVar[dict[int, dict[TypeVar, int]]](
     "_class_typevar_context", default={}
 )
@@ -24,15 +24,15 @@ _active_class_context = ContextVar[dict[TypeVar, int]](
 
 
 def _extract_shape_typevars(annotation: Any) -> list[tuple[int, TypeVar]]:
-    """Extract TypeVars from a TypedNDArray annotation with their dimension index."""
+    """Extract TypeVars from a TypedNDArray annotation with their dimension indices."""
 
     # _NDShape
     if isinstance(annotation, _NDShape):
-        typevars = list[tuple[int, TypeVar]]()
-        for idx, dim in enumerate(annotation.shape):
-            if isinstance(dim, TypeVar):
-                typevars.append((idx, dim))
-        return typevars
+        return [
+            (idx, dim)
+            for idx, dim in enumerate(annotation.shape_spec)
+            if isinstance(dim, TypeVar)
+        ]
 
     # GenericAlias
     origin = get_origin(annotation)
@@ -46,11 +46,9 @@ def _extract_shape_typevars(annotation: Any) -> list[tuple[int, TypeVar]]:
     shape_spec = args[0]
     if get_origin(shape_spec) is tuple:
         shape_dims = get_args(shape_spec)
-        typevars = list[tuple[int, TypeVar]]()
-        for idx, dim in enumerate(shape_dims):
-            if isinstance(dim, TypeVar):
-                typevars.append((idx, dim))
-        return typevars
+        return [
+            (idx, dim) for idx, dim in enumerate(shape_dims) if isinstance(dim, TypeVar)
+        ]
 
     return []
 
@@ -58,7 +56,7 @@ def _extract_shape_typevars(annotation: Any) -> list[tuple[int, TypeVar]]:
 def _is_class_level_typevar(typevar: TypeVar, owner_cls: type) -> bool:
     """Check if a TypeVar is bound at class level vs method level."""
     cls_params = getattr(owner_cls, "__parameters__", ())
-    return typevar in set(cls_params)
+    return typevar in cls_params
 
 
 def _get_instance_class_context(instance: Any) -> dict[TypeVar, int]:
@@ -74,10 +72,10 @@ def _get_instance_class_context(instance: Any) -> dict[TypeVar, int]:
 
 def enforce_shapes(func):
     """
-    Automatically validate TypeVar shape bindings.
+    Decorator to automatically validate TypeVar shape bindings.
     - Class-level TypeVars (from Generic[T]) are bound per-instance, persist across calls
-    - Method-level TypeVars are validated per-call only (within same call)
-    - Both parameter and return types are validated
+    - Method-level TypeVars are validated per-call only, local to single invocation
+    - Validates both parameter and return types
     """
 
     @wraps(func)
@@ -114,25 +112,30 @@ def enforce_shapes(func):
                     if typevar in class_context:
                         expected_dim = class_context[typevar]
                         if actual_dim != expected_dim:
-                            raise ShapeError(
-                                f"In {func.__name__}(...): parameter '{param_name}' "
-                                f"dimension {dim_idx} ({typevar.__name__}): "
-                                f"expected {expected_dim} (class-level binding), got {actual_dim}"
+                            raise DimensionError(
+                                f"In {func.__name__}(...), parameter `{param_name}`'s "
+                                f"dimension {dim_idx} [{typevar}] "
+                                f"expected {expected_dim} (class-level binding), "
+                                f"got {actual_dim}"
                             )
                     else:
+                        # First binding for this instance
                         class_context[typevar] = actual_dim
                 else:
                     if typevar in method_context:
                         expected_dim = method_context[typevar]
                         if actual_dim != expected_dim:
-                            raise ShapeError(
-                                f"In {func.__name__}(): parameter '{param_name}' "
-                                f"dimension {dim_idx} ({typevar.__name__}): "
-                                f"expected {expected_dim} (method-level binding), got {actual_dim}"
+                            raise DimensionError(
+                                f"In {func.__name__}(...), parameter `{param_name}`'s "
+                                f"dimension {dim_idx} [{typevar}] "
+                                f"expected {expected_dim} (method-level binding), "
+                                f"got {actual_dim}"
                             )
                     else:
+                        # First binding in this call
                         method_context[typevar] = actual_dim
 
+        # Execute function with active contexts
         method_token = _method_typevar_context.set(method_context)
         class_token = _active_class_context.set(class_context)
         try:
@@ -145,7 +148,6 @@ def enforce_shapes(func):
         if "return" in hints and result is not None:
             return_annotation = hints["return"]
             typevars = _extract_shape_typevars(return_annotation)
-
             if typevars and hasattr(result, "shape"):
                 actual_shape = result.shape
                 for dim_idx, typevar in typevars:
@@ -159,10 +161,11 @@ def enforce_shapes(func):
                         expected_dim = context[typevar]
                         if actual_dim != expected_dim:
                             level = "class" if is_class_level else "method"
-                            raise ShapeError(
-                                f"In {func.__name__}(): return value "
+                            raise DimensionError(
+                                f"In {func.__name__}(...) return value: "
                                 f"dimension {dim_idx} ({typevar.__name__}): "
-                                f"expected {expected_dim} ({level}-level binding), got {actual_dim}"
+                                f"expected {expected_dim} ({level}-level binding), "
+                                f"got {actual_dim}"
                             )
 
         return result
