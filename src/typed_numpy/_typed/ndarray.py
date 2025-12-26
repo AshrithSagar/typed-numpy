@@ -69,6 +69,39 @@ def _validate_shape(expected: _RuntimeShape, actual: tuple[int, ...]) -> None:
             raise ShapeError(f"Shape mismatch: expected {expected}, got {actual}")
 
 
+def _validate_shape_against_active_contexts(
+    shape_spec: _Shape, actual_shape: tuple[int, ...]
+) -> None:
+    """Validate shape against both class-level and method-level TypeVar contexts."""
+    from typed_numpy._typed.context import (
+        _active_class_context,
+        _method_typevar_context,
+    )
+
+    typevars_in_spec: list[tuple[int, TypeVar]] = []
+    for idx, dim in enumerate(shape_spec):
+        if isinstance(dim, TypeVar):
+            typevars_in_spec.append((idx, dim))
+    if not typevars_in_spec:
+        return
+
+    method_context = _method_typevar_context.get()
+    class_context = _active_class_context.get()
+    for dim_idx, typevar in typevars_in_spec:
+        if dim_idx >= len(actual_shape):
+            continue
+        actual_dim = actual_shape[dim_idx]
+        expected_dim = (
+            method_context.get(typevar)
+            if typevar in method_context
+            else class_context.get(typevar)
+        )
+        if expected_dim is not None and actual_dim != expected_dim:
+            raise ShapeError(
+                f"TypeVar {typevar} mismatch: expected {expected_dim}, got {actual_dim}"
+            )
+
+
 class TypedNDArray(np.ndarray[_ShapeT_co, _DTypeT_co]):
     """Generic `numpy.ndarray` subclass with static shape typing and runtime shape validation."""
 
@@ -139,8 +172,11 @@ class TypedNDArray(np.ndarray[_ShapeT_co, _DTypeT_co]):
         obj = _arr.view(cls)
 
         # Set metadata
+        _shape_for_validation: _Shape | None = None
         if shape is not None:
             obj.__bound_shape__ = _resolve_shape(shape)
+            if isinstance(shape, tuple):
+                _shape_for_validation = shape
         elif _shape_static is not None:
             obj.__bound_shape__ = _resolve_shape(_shape_static)
         else:
@@ -149,6 +185,8 @@ class TypedNDArray(np.ndarray[_ShapeT_co, _DTypeT_co]):
         # Runtime validation
         if obj.__bound_shape__ is not None:
             _validate_shape(expected=obj.__bound_shape__, actual=_arr.shape)
+        if _shape_for_validation is not None:
+            _validate_shape_against_active_contexts(_shape_for_validation, _arr.shape)
 
         # [NOTE] numpy.ndarray.view should suffice for the return type;
         # Explicit casting would prolly have a redunant call to TypedNDArray.__class_getitem__;
@@ -175,24 +213,38 @@ class _NDShape:
     Behaves like a type-level curry.
     """
 
-    __slots__ = ("base", "shape")
+    __slots__ = ("base", "shape", "explicit")
 
-    def __init__(self, cls: type[TypedNDArray], shape: _AcceptedDim | _AcceptedShape):
+    def __init__(
+        self,
+        cls: type[TypedNDArray],
+        shape: _AcceptedDim | _AcceptedShape,
+        explicit: bool = False,  # Track if explicitly re-specified
+    ):
         self.base = cls
         self.shape = _normalise_shape(shape)
+        self.explicit = explicit
 
     def __getitem__(self, item: _AcceptedDim | _AcceptedShape) -> "_NDShape":
-        """Bind dimensions to unbound TypeVars by position."""
+        """Bind dimensions to unbound TypeVars by position, using defaults for missing ones."""
         _item = _normalise_shape(item)
-        unbound = [i for i, dim in enumerate(self.shape) if isinstance(dim, TypeVar)]
-        if len(_item) > len(unbound):
+        unbound_typevars = [
+            (i, dim) for i, dim in enumerate(self.shape) if isinstance(dim, TypeVar)
+        ]
+        if len(_item) > len(unbound_typevars):
             # For a runtime error; Statically should already be caught;
-            raise DimensionError("Too many dimensions")
+            raise DimensionError(
+                f"Too many type arguments: expected at most {len(unbound_typevars)}, got {len(_item)}"
+            )
 
         shape = list(self.shape)
-        for pos, dim in zip(unbound[: len(_item)], _item):
+        for (pos, _), dim in zip(unbound_typevars[: len(_item)], _item):
             shape[pos] = dim
-        return _NDShape(cls=self.base, shape=tuple(shape))
+        for pos, typevar in unbound_typevars[len(_item) :]:
+            default = getattr(typevar, "__default__", None)
+            if default is not None:
+                shape[pos] = default
+        return _NDShape(cls=self.base, shape=tuple(shape), explicit=True)
 
     def __call__(
         self,
@@ -203,7 +255,8 @@ class _NDShape:
     ) -> TypedNDArray[_AnyShape, np.dtype[Any]]:
         # [NOTE] Should mimick TypedNDArray.__new__ signature
         # [TODO] Resolve any potential side-effects through the provided shape kwarg?
-        return self.base(arr, dtype=dtype, shape=self.shape)
+        _shape = self.shape if self.explicit else None
+        return self.base(arr, dtype=dtype, shape=_shape)
 
     def __repr__(self) -> str:
         dims = ", ".join(str(dim) for dim in self.shape)

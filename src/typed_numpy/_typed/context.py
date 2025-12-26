@@ -15,6 +15,12 @@ from typed_numpy._typed.ndarray import ShapeError, _NDShape
 _class_typevar_context = ContextVar[dict[int, dict[TypeVar, int]]](
     "_class_typevar_context", default={}
 )
+_method_typevar_context = ContextVar[dict[TypeVar, int]](
+    "_method_typevar_context", default={}
+)
+_active_class_context = ContextVar[dict[TypeVar, int]](
+    "_active_class_context", default={}
+)
 
 
 def _extract_shape_typevars(annotation: Any) -> list[tuple[int, TypeVar]]:
@@ -127,7 +133,13 @@ def enforce_shapes(func):
                     else:
                         method_context[typevar] = actual_dim
 
-        result = func(self, *args, **kwargs)
+        method_token = _method_typevar_context.set(method_context)
+        class_token = _active_class_context.set(class_context)
+        try:
+            result = func(self, *args, **kwargs)
+        finally:
+            _method_typevar_context.reset(method_token)
+            _active_class_context.reset(class_token)
 
         # Validate return
         if "return" in hints and result is not None:
