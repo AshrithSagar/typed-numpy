@@ -13,3 +13,7 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = ["mypy>=1.19.1", "ruff>=0.14.10"]
+test = ["pytest>=9.0.2", "pytest-memray>=1.8.0"]
+
+[tool.uv]
+default-groups = "all"
