@@ -5,7 +5,8 @@
 Typed NumPy with static shape typing and runtime shape validation.
 
 > [!WARNING]
-> Experimental & WIP
+> Experimental & WIP.
+> See [USAGE.md](USAGE.md) for more details.
 
 ## Installation
 
@@ -73,6 +74,8 @@ v2 = Vector([4, 5, 6, 7])  # Also passes
 v3 = TypedNDArray[tuple[int]]([[8, 9]])
 # Fails, since expected 1D array but passed in a 2D array
 ```
+
+See [USAGE.md](USAGE.md) for more details.
 
 ## License
 
