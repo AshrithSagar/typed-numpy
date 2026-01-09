@@ -16,6 +16,7 @@ import numpy as np
 import numpy.typing as npt
 
 from typed_numpy._typed import TypedNDArray
+from typed_numpy._typed.context import enforce_shapes
 ```
 
 </details>
@@ -128,6 +129,7 @@ img = Image256x256(np.random.random((256, 256, 3)))  # Passes
 
 ```python
 # Both vectors must have the same dimension N
+@enforce_shapes
 def dot_product(a: Vector[N], b: Vector[N]) -> float:
     return float(np.dot(a, b))
 ```
@@ -136,6 +138,7 @@ def dot_product(a: Vector[N], b: Vector[N]) -> float:
 
 ```python
 # N must match between matrix columns and vector length
+@enforce_shapes
 def mat_vec_multiply(
     matrix: Matrix[M, N],
     vector: Vector[N]

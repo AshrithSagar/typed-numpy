@@ -223,7 +223,7 @@ class _NDShape:
         cls: type[TypedNDArray],
         shape_spec: _AcceptedShape,
         dtype_spec: Any = Any,
-        validate: bool = False,
+        validate: bool = True,
     ):
         self.base = cls
         self.shape_spec = shape_spec
