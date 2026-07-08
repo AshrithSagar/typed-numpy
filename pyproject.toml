@@ -17,11 +17,11 @@ lint = ["ruff>=0.15.20"]
 test = ["pytest>=9.1.1", "pytest-memray>=1.9.0"]
 typecheck = [
     "basedpyright>=1.39.9",
-    "mypy[mypyc]>=2.1.0",
+    "mypy[mypyc]>=2.2.0",
     "pycroscope>=0.4.0",
     "pyrefly>=1.1.1",
     "pyright>=1.1.411",
-    "ty>=0.0.56",
+    "ty>=0.0.57",
     "zuban>=0.9.0",
 ]
 
