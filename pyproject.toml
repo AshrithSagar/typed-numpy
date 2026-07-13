@@ -8,12 +8,12 @@ authors = [{ name = "Ashrith Sagar", email = "ashrith9sagar@gmail.com" }]
 dependencies = ["numpy>=2.2"]
 
 [build-system]
-requires = ["uv_build>=0.11.26,<0.12.0"]
+requires = ["uv_build>=0.11.28,<0.12.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
 dev = ["rich>=15.0.0"]
-lint = ["ruff>=0.15.20"]
+lint = ["ruff>=0.15.21"]
 test = ["pytest>=9.1.1", "pytest-memray>=1.9.0"]
 typecheck = [
     "basedpyright>=1.39.9",
@@ -21,7 +21,7 @@ typecheck = [
     "pycroscope>=0.4.0",
     "pyrefly>=1.1.1",
     "pyright>=1.1.411",
-    "ty>=0.0.57",
+    "ty>=0.0.59",
     "zuban>=0.9.0",
 ]
 
